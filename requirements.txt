@@ -1,8 +1,6 @@
 streamlit==1.32.2
 torch==2.1.2
 transformers==4.36.2
-sentencepiece==0.1.99
-langdetect==1.0.9
-nltk==3.8.1
-gTTS==2.5.1
-reportlab==4.0.9
+sentencepiece
+langdetect
+nltk
