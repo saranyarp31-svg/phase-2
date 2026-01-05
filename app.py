@@ -1,29 +1,23 @@
 import streamlit as st
-import openai
-import uuid
-import os
-from datetime import datetime
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
-from langdetect import detect
 import nltk
-import tempfile
 import requests
 import urllib.parse
-
-# -------------------------------
-# INITIAL SETUP
-# -------------------------------
-st.set_page_config(page_title="Rural ACT – Phase 2", layout="wide")
-st.title("🌾 Rural ACT – Phase 2 (Perfect Tamil Engine)")
+import uuid
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
 
 nltk.download("punkt")
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# --------------------------------
+# STREAMLIT SETUP
+# --------------------------------
+st.set_page_config(page_title="Rural ACT – Phase 2", layout="wide")
+st.title("🌾 Rural ACT – Any Language → Perfect Tamil")
+st.caption("No API Keys • Long Paragraph Safe • PDF + Voice")
 
-# -------------------------------
+# --------------------------------
 # SEMANTIC CHUNKING
-# -------------------------------
+# --------------------------------
 def semantic_chunks(text, max_sentences=4):
     sentences = nltk.sent_tokenize(text)
     chunks, temp = [], []
@@ -39,141 +33,117 @@ def semantic_chunks(text, max_sentences=4):
 
     return chunks
 
-# -------------------------------
-# PERFECT TAMIL GENERATION
-# -------------------------------
-def generate_perfect_tamil(english_text):
-    prompt = f"""
-Rewrite the following content into very clear,
-natural, grammatically perfect Tamil.
+# --------------------------------
+# ANY LANGUAGE → TAMIL (LibreTranslate)
+# --------------------------------
+def translate_to_tamil(text):
+    url = "https://libretranslate.de/translate"
+    payload = {
+        "q": text,
+        "source": "auto",
+        "target": "ta",
+        "format": "text"
+    }
 
-Rules:
-- Tamil only
-- Suitable for rural users
-- Do NOT translate word by word
-- Preserve meaning
-- Use spoken but respectful Tamil
+    response = requests.post(url, data=payload, timeout=20)
+    return response.json()["translatedText"]
 
-Text:
-{english_text}
-"""
+# --------------------------------
+# TAMIL POLISHING (RULE-BASED)
+# --------------------------------
+def polish_tamil(text):
+    replacements = {
+        "நீங்கள்": "நீங்க",
+        "உங்களுக்கு": "உங்களுக்கு",
+        "இல்லை என்றால்": "இல்லைனா",
+        "ஆகிறது": "ஆகுது",
+        "மற்றும்": "மற்றும்",
+    }
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3
-    )
+    for k, v in replacements.items():
+        text = text.replace(k, v)
 
-    return response.choices[0].message.content.strip()
+    return text
 
-# -------------------------------
-# ANY LANGUAGE → ENGLISH
-# -------------------------------
-def to_english(text):
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Translate the input text to English accurately."},
-            {"role": "user", "content": text}
-        ],
-        temperature=0
-    )
-    return response.choices[0].message.content.strip()
-
-# -------------------------------
-# LONG TAMIL TTS (GOOGLE – STABLE)
-# -------------------------------
+# --------------------------------
+# TAMIL TTS (LONG SAFE)
+# --------------------------------
 def tamil_tts(text):
     files = []
     chunks = semantic_chunks(text, max_sentences=2)
 
     for chunk in chunks:
-        text_encoded = urllib.parse.quote(chunk)
-        url = (
-            f"https://translate.google.com/translate_tts?"
-            f"ie=UTF-8&q={text_encoded}&tl=ta&client=tw-ob"
-        )
+        encoded = urllib.parse.quote(chunk)
+        url = f"https://translate.google.com/translate_tts?ie=UTF-8&q={encoded}&tl=ta&client=tw-ob"
+        r = requests.get(url)
 
-        response = requests.get(url)
-        if response.status_code == 200:
+        if r.status_code == 200:
             filename = f"tts_{uuid.uuid4()}.mp3"
             with open(filename, "wb") as f:
-                f.write(response.content)
+                f.write(r.content)
             files.append(filename)
 
     return files
 
-# -------------------------------
-# PDF GENERATION (LONG SAFE)
-# -------------------------------
-def generate_pdf(original, tamil_text):
-    file_path = f"RuralACT_{uuid.uuid4()}.pdf"
+# --------------------------------
+# PDF GENERATION (LONG TEXT SAFE)
+# --------------------------------
+def generate_pdf(original, tamil):
+    filename = f"RuralACT_{uuid.uuid4()}.pdf"
+    doc = SimpleDocTemplate(filename)
     styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(file_path)
 
-    story = []
-    story.append(Paragraph("<b>Original Input</b>", styles["Heading2"]))
-    story.append(Paragraph(original, styles["Normal"]))
-    story.append(Paragraph("<br/>", styles["Normal"]))
-    story.append(Paragraph("<b>Tamil Output</b>", styles["Heading2"]))
+    story = [
+        Paragraph("<b>Original Input</b>", styles["Heading2"]),
+        Paragraph(original, styles["Normal"]),
+        Paragraph("<br/>", styles["Normal"]),
+        Paragraph("<b>Tamil Output</b>", styles["Heading2"])
+    ]
 
-    for para in tamil_text.split("\n\n"):
-        story.append(Paragraph(para, styles["Normal"]))
+    for p in tamil.split("\n\n"):
+        story.append(Paragraph(p, styles["Normal"]))
 
     doc.build(story)
-    return file_path
+    return filename
 
-# -------------------------------
-# UI INPUT
-# -------------------------------
+# --------------------------------
+# UI
+# --------------------------------
 user_input = st.text_area(
-    "📝 Enter text (ANY language, long paragraph supported):",
-    height=200
+    "📝 Enter text (ANY language, long paragraphs supported)",
+    height=220
 )
 
-if st.button("🚀 Convert to Perfect Tamil"):
+if st.button("🚀 Convert to Tamil"):
     if not user_input.strip():
-        st.warning("Please enter text.")
+        st.warning("Please enter text")
         st.stop()
 
-    with st.spinner("🔍 Processing language & meaning..."):
-        detected_lang = detect(user_input)
-        english_text = to_english(user_input)
-
-    with st.spinner("🧠 Generating perfect Tamil..."):
-        eng_chunks = semantic_chunks(english_text)
-        tamil_chunks = [generate_perfect_tamil(c) for c in eng_chunks]
-        final_tamil = "\n\n".join(tamil_chunks)
+    with st.spinner("🌍 Translating to Tamil..."):
+        chunks = semantic_chunks(user_input)
+        tamil_chunks = [translate_to_tamil(c) for c in chunks]
+        tamil_text = "\n\n".join(tamil_chunks)
+        tamil_text = polish_tamil(tamil_text)
 
     st.subheader("📌 Tamil Output")
-    st.success(final_tamil)
+    st.success(tamil_text)
 
-    # -------------------------------
-    # AUDIO
-    # -------------------------------
-    st.subheader("🔊 Tamil Voice Output")
-    audio_files = tamil_tts(final_tamil)
+    st.subheader("🔊 Tamil Voice")
+    audio_files = tamil_tts(tamil_text)
     for f in audio_files:
         st.audio(f)
 
-    # -------------------------------
-    # PDF DOWNLOAD
-    # -------------------------------
-    pdf_file = generate_pdf(user_input, final_tamil)
-    with open(pdf_file, "rb") as f:
+    pdf = generate_pdf(user_input, tamil_text)
+    with open(pdf, "rb") as f:
         st.download_button(
             "📄 Download Tamil PDF",
-            data=f,
-            file_name="RuralACT_Tamil_Output.pdf",
+            f,
+            file_name="Tamil_Output.pdf",
             mime="application/pdf"
         )
 
-    st.caption("✅ Works for long paragraphs | Any language | Natural Tamil")
-
-# -------------------------------
-# FOOTER
-# -------------------------------
 st.markdown("---")
-st.caption("Phase 2 – Hierarchical Semantic Tamil Reconstruction (HSTR)")
+st.caption("Phase-2 | Rule-Guided Multistage Tamil Reconstruction (RG-MTR)")
+
 
 
