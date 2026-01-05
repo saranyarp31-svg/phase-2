@@ -1,7 +1,4 @@
 streamlit
-openai
-langdetect
 nltk
-reportlab
 requests
-urllib3
+reportlab
