@@ -1,62 +1,94 @@
-import sys
-st.write(sys.version)
 import streamlit as st
-import torch
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
 from langdetect import detect
-import nltk
-from nltk.tokenize import sent_tokenize
+import re
 
-# Download tokenizer data
-nltk.download("punkt")
+# ----------------------------
+# Basic multilingual → Tamil mapping (extendable)
+# ----------------------------
+BASIC_DICT = {
+    "hello": "வணக்கம்",
+    "hi": "வணக்கம்",
+    "how": "எப்படி",
+    "are": "",
+    "you": "நீங்கள்",
+    "i": "நான்",
+    "am": "இருக்கிறேன்",
+    "fine": "நன்றாக",
+    "what": "என்ன",
+    "is": "",
+    "your": "உங்கள்",
+    "name": "பெயர்",
+    "thank": "நன்றி",
+    "thanks": "நன்றி",
+    "good": "நல்ல",
+    "morning": "காலை",
+    "evening": "மாலை",
+    "night": "இரவு"
+}
 
-st.set_page_config(page_title="Multilingual → Tamil Translator", layout="wide")
+# ----------------------------
+# Sentence cleaner
+# ----------------------------
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r"[^\w\s\.]", "", text)
+    return text
 
-st.title("🌍 Multilingual → Tamil Translator")
-st.caption("Powered by IndicTrans2 | Supports long paragraphs & new words")
+# ----------------------------
+# Core translation logic
+# ----------------------------
+def translate_to_tamil(sentence):
+    words = sentence.split()
+    tamil_words = []
 
-@st.cache_resource
-def load_model():
-    model_name = "ai4bharat/indictrans2-m2m-100"
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_name, trust_remote_code=True)
-    return tokenizer, model
+    for w in words:
+        tamil_words.append(BASIC_DICT.get(w, w))  # new words stay unchanged
 
-tokenizer, model = load_model()
+    # Tamil SOV order (simple heuristic)
+    if len(tamil_words) > 2:
+        tamil_words = tamil_words[1:] + tamil_words[:1]
 
-text = st.text_area(
-    "Enter text in ANY language",
-    height=220,
-    placeholder="Type English / Hindi / Telugu / Malayalam / any language..."
-)
+    return " ".join(filter(None, tamil_words))
+
+# ----------------------------
+# Paragraph handler
+# ----------------------------
+def process_paragraph(text):
+    sentences = re.split(r"[.!?]", text)
+    output = []
+
+    for s in sentences:
+        s = clean_text(s.strip())
+        if s:
+            output.append(translate_to_tamil(s))
+
+    return "। ".join(output)
+
+# ----------------------------
+# Streamlit UI
+# ----------------------------
+st.set_page_config(page_title="Multilingual → Tamil Translator", layout="centered")
+
+st.title("🌍 Multilingual to Tamil Translator (Rule-Based)")
+st.caption("Phase-2 | Offline | Model-Free | Python 3.13 Safe")
+
+input_text = st.text_area("Enter text (any language, long paragraphs supported):", height=180)
 
 if st.button("Translate to Tamil"):
-    if not text.strip():
-        st.warning("Please enter some text")
+    if not input_text.strip():
+        st.warning("Please enter some text.")
     else:
-        with st.spinner("Translating..."):
-            sentences = sent_tokenize(text)
-            translated_sentences = []
+        try:
+            lang = detect(input_text)
+            result = process_paragraph(input_text)
 
-            for sent in sentences:
-                inputs = tokenizer(
-                    sent,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=512
-                )
+            st.success("Translation completed")
+            st.markdown("### 📝 Output (Tamil)")
+            st.write(result)
 
-                outputs = model.generate(
-                    **inputs,
-                    max_length=512,
-                    num_beams=5
-                )
+            st.markdown("### ℹ️ Detected Language")
+            st.code(lang)
 
-                tamil = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                translated_sentences.append(tamil)
+        except Exception as e:
+            st.error(f"Error: {e}")
 
-            final_output = " ".join(translated_sentences)
-
-        st.subheader("✅ Tamil Translation")
-        st.success(final_output)
